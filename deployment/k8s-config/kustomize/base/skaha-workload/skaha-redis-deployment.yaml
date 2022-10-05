@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    run: skaha-redis
+  name: skaha-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      run: skaha-redis
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        run: skaha-redis
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: nvidia.com/gpu.count
+                operator: DoesNotExist
+      containers:
+      - name: skaha-redis
+        image: redis
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "4Gi"
+            cpu: "1"
+          limits:
+            memory: "8Gi"
+            cpu: "4"
+        ports:
+        - containerPort: 6379
+          protocol: TCP
+      securityContext:
+        runAsUser: 1000
+      priorityClassName: uber-user-preempt-high
+#      serviceAccountName: skaha

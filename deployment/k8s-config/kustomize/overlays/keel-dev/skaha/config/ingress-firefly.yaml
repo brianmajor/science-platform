@@ -1,0 +1,28 @@
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: skaha-firefly-middleware-${skaha.sessionid}
+spec:
+  replacePathRegex:
+    regex: ^/session/firefly/${skaha.sessionid}(/|$)(.*)
+    replacement: /$2
+
+---
+
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: skaha-firefly-ingress-${skaha.sessionid}
+spec:
+  entryPoints:
+    - web
+  routes:
+  - kind: Rule
+    match: Host(`rc-uv.canfar.net`) && PathPrefix(`/session/firefly/${skaha.sessionid}/`)
+    services:
+    - kind: Service
+      name: skaha-firefly-svc-${skaha.sessionid}
+      port: 8080
+      scheme: http
+    middlewares:
+      - name: skaha-firefly-middleware-${skaha.sessionid}
