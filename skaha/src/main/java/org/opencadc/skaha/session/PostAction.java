@@ -339,6 +339,11 @@ public class PostAction extends SessionAction {
                 servicePath = System.getProperty("user.home") + "/config/service-notebook.yaml";
                 ingressPath = System.getProperty("user.home") + "/config/ingress-notebook.yaml";
                 break;
+            case SessionAction.SESSION_TYPE_FIREFLY:
+                jobLaunchPath = System.getProperty("user.home") + "/config/launch-firefly.yaml";
+                servicePath = System.getProperty("user.home") + "/config/service-firefly.yaml";
+                ingressPath = System.getProperty("user.home") + "/config/ingress-firefly.yaml";
+                break;
             case SessionAction.SESSION_TYPE_CONTRIB:
                 jobLaunchPath = System.getProperty("user.home") + "/config/launch-contributed.yaml";
                 servicePath = System.getProperty("user.home") + "/config/service-contributed.yaml";
