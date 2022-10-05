@@ -1,4 +1,7 @@
 namespace: skaha-workload
+resources:
+- skaha-redis-deployment.yaml
+- skaha-redis-expose.yaml
 configMapGenerator:
 - name: start-desktop-software
   files:
