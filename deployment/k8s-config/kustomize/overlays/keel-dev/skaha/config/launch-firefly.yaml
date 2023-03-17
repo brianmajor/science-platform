@@ -32,17 +32,6 @@ spec:
       priorityClassName: uber-user-preempt-medium
       hostname: "${software.hostname}"
       containers:
-#      - name: "${skaha.jobname}-redis"
-#        image: redis
-#        imagePullPolicy: Always
-#        resources:
-#          limits:
-#            memory: "20Mi"
-#            cpu: "1"
-#        ports:
-#        - containerPort: 6379
-#          protocol: TCP
-#          name: redis-port
       - name: "${skaha.jobname}"
         env:
         - name: skaha_hostname
@@ -55,6 +44,8 @@ spec:
           value: "/arc/home/${skaha.userid}"
         - name: PWD
           value: "/arc/home/${skaha.userid}"
+        - name: USE_ADMIN_AUTH
+          value: "false"
         image: ${software.imageid}
         imagePullPolicy: Always
         resources:
