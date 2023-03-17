@@ -1,0 +1,236 @@
+
+logLevel: debug
+
+externalURL: https://images-rc.canfar.net
+
+containerSecurityContext:
+  runAsGroup: 1001
+  runAsNonRoot: true
+
+podSecurityContext:
+  fsGroup: 1001
+
+exposureType: ingress
+
+#***************************************************
+ingress:
+
+  core:
+    hostname: images-rc.canfar.net
+    annotations:
+      kubernetes.io/ingress.class: traefik
+      ingress.kubernetes.io/ssl-redirect: "true"
+      ingress.kubernetes.io/proxy-body-size: "0"
+      traefik.ingress.kubernetes.io/router.tls: "true"
+      nginx.ingress.kubernetes.io/ssl-redirect: null
+      nginx.ingress.kubernetes.io/proxy-body-size: null
+    extraTls:
+    - hosts:
+        - images-rc.canfar.net
+      secretName: canfar-net-cert-secret
+
+  notary: 
+    hostname: notary-rc.canfar.net
+    annotations:
+      kubernetes.io/ingress.class: traefik
+      ingress.kubernetes.io/ssl-redirect: "true"
+      ingress.kubernetes.io/proxy-body-size: "0"
+      traefik.ingress.kubernetes.io/router.tls: "true"
+      nginx.ingress.kubernetes.io/ssl-redirect: null
+      nginx.ingress.kubernetes.io/proxy-body-size: null
+    extraTls:
+    - hosts:
+        - images-rc.canfar.net
+      secretName: canfar-net-cert-secret
+
+#***************************************************
+notary:
+  server: 
+    priorityClassName: uber-user-preempt-high
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: nvidia.com/gpu.count
+              operator: DoesNotExist
+
+  signer: 
+    priorityClassName: uber-user-preempt-high
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: nvidia.com/gpu.count
+              operator: DoesNotExist
+
+#***************************************************
+portal:
+  priorityClassName: uber-user-preempt-high
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.count
+            operator: DoesNotExist
+
+#***************************************************
+chartmuseum:
+  priorityClassName: uber-user-preempt-high
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.count
+            operator: DoesNotExist
+
+#***************************************************
+jobservice:
+  priorityClassName: uber-user-preempt-high
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.count
+            operator: DoesNotExist
+
+#***************************************************
+registry:
+  priorityClassName: uber-user-preempt-high
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.count
+            operator: DoesNotExist
+
+#***************************************************
+trivy:
+  priorityClassName: uber-user-preempt-high
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.count
+            operator: DoesNotExist
+
+#***************************************************
+persistence:
+  enabled: true
+
+  persistentVolumeClaim:
+    registry:
+      existingClaim: ""
+      storageClass: ""
+      subPath: "harbor-registry"
+      accessMode: ReadWriteOnce
+      size: 800Gi
+
+    jobservice:
+      existingClaim: ""
+      storageClass: ""
+      subPath: "harbor-jobservice"
+      accessMode: ReadWriteOnce
+      size: 10Gi
+
+    chartmuseum:
+      existingClaim: ""
+      storageClass: ""
+      subPath: "harbor-chartmuseum"
+      accessMode: ReadWriteOnce
+      size: 40Gi
+
+    trivy:
+      storageClass: ""
+      accessMode: ReadWriteOnce
+      size: 40Gi
+
+  imageChartStorage:
+    disableredirect: true
+
+
+#***************************************************
+core:
+  priorityClassName: uber-user-preempt-high
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: nvidia.com/gpu.count
+            operator: DoesNotExist
+
+
+
+#***************************************************
+postgresql:
+  enabled: true
+
+  persistence:
+    enabled: true
+    storageClass: ""
+    subPath: harbor-postgresql
+
+  primary:
+    priorityClassName: uber-user-preempt-high
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: nvidia.com/gpu.count
+              operator: DoesNotExist
+    volumes:
+      - name: postgresql-extended-config
+        configMap:
+          name: cadc-harbor-postgresql-extended-configuration
+          defaultMode: 0640
+      - name: custom-init-scripts
+        configMap:
+          name: cadc-harbor-postgresql-init-scripts
+          defaultMode: 0640
+
+    extraVolumeMounts:
+      - name: writableconf
+        mountPath: /opt/bitnami/postgresql/conf
+      - name: writableconfd
+        mountPath: /opt/bitnami/postgresql/conf/conf.d
+      - name: writabletmp
+        mountPath: /opt/bitnami/postgresql/tmp
+    extraVolumes:
+      - name: writableconf
+        emptyDir: {}
+      - name: writableconfd
+        emptyDir: {}
+      - name: writabletmp
+        emptyDir: {}
+
+#***************************************************
+redis:
+  enabled: true
+
+  master:
+    priorityClassName: uber-user-preempt-high
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: nvidia.com/gpu.count
+              operator: DoesNotExist
+    persistence:
+      enabled: true
+      storageClass: ""
+      subPath: harbor-redis
+
+  replica:
+    persistence:
+      enabled: true
+      storageClass: ""
+      subPath: harbor-redis

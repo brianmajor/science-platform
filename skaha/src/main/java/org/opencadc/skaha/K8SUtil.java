@@ -92,6 +92,10 @@ public class K8SUtil {
         return "skaha-" + type + "-ingress-" + sessionID;
     }
     
+    public static String getMiddlewareName(String sessionID, String type) {
+        return "skaha-" + type + "-middleware-" + sessionID;
+    }
+    
     public static String getHomeDir() {
         return System.getenv("skaha.homedir");
     }
@@ -100,4 +104,8 @@ public class K8SUtil {
         return System.getenv("skaha.scratchdir");
     }
 
+    public static String getSessionExpiry() {
+        return System.getenv("skaha.sessionexpiry");
+    }
+    
 }

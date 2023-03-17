@@ -70,6 +70,7 @@ package org.opencadc.skaha.session;
 import ca.nrc.cadc.net.ResourceNotFoundException;
 import ca.nrc.cadc.util.StringUtil;
 
+import java.io.IOException;
 import java.security.AccessControlException;
 
 import org.apache.log4j.Logger;
@@ -105,50 +106,66 @@ public class DeleteAction extends SessionAction {
                         "USERID:.metadata.labels.canfar-net-userid"};
                         
                 String session = execute(getSessionCMD);
-                if (!StringUtil.hasText(session)) {
-                    throw new ResourceNotFoundException(sessionID);
+                if (StringUtil.hasText(session)) {
+                    String[] lines = session.split("\n");
+                    if (lines.length > 0) {
+                        // sessionID was added to desktop-app. This resulted in the 
+                        // above kubectl command returning desktop-app as well. We 
+                        // want to ignore them as we pick the session to be deleted.
+                        for (String line : lines) {
+                            String[] parts = line.split("\\s+");
+                            String type = parts[0];
+                            if (!TYPE_DESKTOP_APP.equals(type)) {
+                                String sessionUserId = parts[1];
+                                if (!userID.equals(sessionUserId)) {
+                                    throw new AccessControlException("forbidden");
+                                }   
+    
+                                deleteSession(userID, type, sessionID);
+                                return;
+                            }
+                        }
+                    }
                 }
-                String[] lines = session.split("\n");
-                if (lines.length != 1) {
-                    throw new IllegalStateException("found multiple sessions with id " + sessionID);
-                }
-                String[] parts = lines[0].split("\\s+");
-                String type = parts[0];
-                String sessionUserid = parts[1];
-                if (!userID.equals(sessionUserid)) {
-                    throw new AccessControlException("forbidden");
-                }   
                 
-                stopSession(userID, type, sessionID);
+                // no session to delete
+                throw new ResourceNotFoundException(sessionID);
             }
-            return;
         }
+
         if (requestType.equals(REQUEST_TYPE_APP)) {
             throw new UnsupportedOperationException("App killing not supported.");
         }
     }
     
-    public void stopSession(String userID, String type, String sessionID) throws Exception {
+    public void deleteSession(String userID, String type, String sessionID) throws Exception {
         // kill the session specified by sessionID
         log.debug("Stopping " + type + " session: " + sessionID);
         String k8sNamespace = K8SUtil.getWorkloadNamespace();
         
         String podName = K8SUtil.getJobName(sessionID, type, userID);
-        String[] cmd = new String[] {
-            "kubectl", "delete", "--namespace", k8sNamespace, "job", podName};
-        execute(cmd);
+        delete(k8sNamespace, "job", podName);
         
         if (!SESSION_TYPE_HEADLESS.equals(type)) {
             String ingressName = K8SUtil.getIngressName(sessionID, type);
-            cmd = new String[] {
-                "kubectl", "delete", "--namespace", k8sNamespace, "ingressroute", ingressName};
-            execute(cmd);
+            delete(k8sNamespace, "ingressroute", ingressName);
             
             String serviceName = K8SUtil.getServiceName(sessionID, type);
-            cmd = new String[] {
-                "kubectl", "delete", "--namespace", k8sNamespace, "service", serviceName};
-            execute(cmd);
+            delete(k8sNamespace, "service", serviceName);
+
+            String middlewareName = K8SUtil.getMiddlewareName(sessionID, type);
+            delete(k8sNamespace, "middleware", middlewareName);
         }
-        
+    }
+    
+    private void delete(String k8sNamespace, String type, String name) throws InterruptedException, IOException {
+        try {
+            String[] cmd = new String[] {
+                "kubectl", "delete", "--namespace", k8sNamespace, type, name};
+            execute(cmd);
+        } catch (Exception ex) {
+            // fail to delete the object, just log a warning and continue
+            log.warn(ex.getMessage());
+        }
     }
 }
