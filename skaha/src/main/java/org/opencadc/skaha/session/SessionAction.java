@@ -235,6 +235,10 @@ public abstract class SessionAction extends SkahaAction {
         return "https://" + host + "/session/notebook/" + sessionID + "/lab/tree/arc/home/" + userid + "?token=" + sessionID;
     }
     
+    public static String getFireflyURL(String host, String sessionID, String userid) throws MalformedURLException {
+        return "https://" + host + "/session/firefly/" + sessionID + "/suit/suit.html";
+    }
+    
     public static String getContributedURL(String host, String sessionID) throws MalformedURLException {
         return "https://" + host + "/session/contrib/" + sessionID + "/";
     }
@@ -736,6 +740,9 @@ public abstract class SessionAction extends SkahaAction {
         }
         if (SessionAction.SESSION_TYPE_NOTEBOOK.equals(type)) {
             connectURL = SessionAction.getNotebookURL(host, id, userid);
+        }
+        if (SessionAction.SESSION_TYPE_FIREFLY.equals(type)) {
+            connectURL = SessionAction.getFireflyURL(host, id, userid);
         }
         if (SessionAction.SESSION_TYPE_CONTRIB.equals(type)) {
             connectURL = SessionAction.getContributedURL(host, id);
