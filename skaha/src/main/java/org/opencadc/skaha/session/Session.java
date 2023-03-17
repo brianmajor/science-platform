@@ -88,7 +88,15 @@ public class Session {
     private String status;
     private String name;
     private String startTime;
+    private String expiryTime;            // in seconds
     private String connectURL;
+    private String requestedRAM;
+    private String requestedCPUCores;
+    private String requestedGPUCores;
+    private String ramInUse;
+    private String gpuRAMInUse;
+    private String cpuCoresInUse;
+    private String gpuUtilization;
 
     public Session(String id, String userid, String image, String type, String status, String name, String startTime, String connectURL) {
         if (id == null) {
@@ -136,6 +144,70 @@ public class Session {
         return connectURL;
     }
     
+    public String getRequestedRAM() {
+        return requestedRAM;
+    }
+    
+    public void setRequestedRAM(String ram) {
+        this.requestedRAM = ram;
+    }
+
+    public String getRequestedCPUCores() {
+        return requestedCPUCores;
+    }
+
+    public void setRequestedCPUCores(String cores) {
+        this.requestedCPUCores = cores;
+    }
+
+    public String getRequestedGPUCores() {
+        return requestedGPUCores;
+    }
+
+    public void setRequestedGPUCores(String cores) {
+        this.requestedGPUCores = cores;
+    }
+
+    public String getCPUCoresInUse() {
+        return cpuCoresInUse;
+    }
+
+    public void setCPUCoresInUse(String cores) {
+        this.cpuCoresInUse = cores;
+    }
+
+    public String getGPUUtilization() {
+        return gpuUtilization;
+    }
+
+    public void setGPUUtilization(String util) {
+        this.gpuUtilization = util;
+    }
+
+    public String getGPURAMInUse() {
+        return gpuRAMInUse;
+    }
+
+    public void setGPURAMInUse(String util) {
+        this.gpuRAMInUse = util;
+    }
+
+    public String getRAMInUse() {
+        return ramInUse;
+    }
+
+    public void setRAMInUse(String memory) {
+        this.ramInUse = memory;
+    }
+
+    public String getExpiryTime() {
+        return expiryTime;
+    }
+
+    public void setExpiryTime(String timeInSeconds) {
+        this.expiryTime = timeInSeconds;
+    }
+    
     @Override
     public boolean equals(Object o) {
         if (o instanceof Session) {
@@ -143,6 +215,13 @@ public class Session {
             return this.id.equals(s.id);
         }
         return false;
+    }
+    
+    @Override
+    public String toString() {
+        return String.format(
+            "Session[id=%s,userid=%s,image=%s,type=%s,status=%s,name=%s,startTime=%s,connectURL=%s]",
+            id, userid, image, type, status, name, startTime, connectURL);
     }
     
 }

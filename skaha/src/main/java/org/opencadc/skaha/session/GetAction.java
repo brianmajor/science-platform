@@ -73,10 +73,20 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
 import java.io.OutputStream;
+import java.text.DecimalFormat;
+import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
+import org.opencadc.skaha.K8SUtil;
 
 /**
  * Process the GET request on the session(s) or app(s).
@@ -86,6 +96,8 @@ import org.apache.log4j.Logger;
 public class GetAction extends SessionAction {
     
     private static final Logger log = Logger.getLogger(GetAction.class);
+    private static final Set<Character> VALID_RAM_UNITS = new HashSet<>(Arrays.asList('T','t','G','g','M','m','K','k'));
+    private static final DecimalFormat formatter = new DecimalFormat("#.###", DecimalFormatSymbols.getInstance( Locale.ENGLISH ));
 
     public GetAction() {
         super();
@@ -95,19 +107,26 @@ public class GetAction extends SessionAction {
     public void doAction() throws Exception {
         super.initRequest();
         if (requestType.equals(REQUEST_TYPE_SESSION)) {
+            String view = syncInput.getParameter("view");
             if (sessionID == null) {
-                // List the sessions
-                String typeFilter = syncInput.getParameter("type");
-                String statusFilter = syncInput.getParameter("status");
-                String view = syncInput.getParameter("view");
-                boolean allUsers = SESSION_LIST_VIEW_ALL.equals(view);
+                if (SESSION_VIEW_STATS.equals(view)) {
+                    ResourceStats resourceStats = getResourceStats();
+                    Gson gson = new GsonBuilder().disableHtmlEscaping().setPrettyPrinting().create();
+                    String json = gson.toJson(resourceStats);
+                    syncOutput.setHeader("Content-Type", "application/json");
+                    syncOutput.getOutputStream().write(json.getBytes());
+                } else {
+                    // List the sessions
+                    String typeFilter = syncInput.getParameter("type");
+                    String statusFilter = syncInput.getParameter("status");
+                    boolean allUsers = SESSION_LIST_VIEW_ALL.equals(view);
                 
-                String json = listSessions(typeFilter, statusFilter, allUsers);
+                    String json = listSessions(typeFilter, statusFilter, allUsers);
                 
-                syncOutput.setHeader("Content-Type", "application/json");
-                syncOutput.getOutputStream().write(json.getBytes());
+                    syncOutput.setHeader("Content-Type", "application/json");
+                    syncOutput.getOutputStream().write(json.getBytes());
+                }
             } else {
-                String view = syncInput.getParameter("view");
                 if (SESSION_VIEW_LOGS.equals(view)) {
                     // return the container log
                     syncOutput.setHeader("Content-Type", "text/plain");
@@ -134,6 +153,208 @@ public class GetAction extends SessionAction {
                 throw new UnsupportedOperationException("App detail viewing not supported.");
             }
         }
+    }
+
+    private ResourceStats getResourceStats() throws Exception {
+        // report stats on sessions and resources
+        List<Session> sessions = getAllSessions(null);
+        int desktopCount = filter(sessions, "desktop-app", "Running").size();
+        int headlessCount = filter(sessions, "headless", "Running").size();
+        int totalCount = filter(sessions, null, "Running").size();
+        String k8sNamespace = K8SUtil.getWorkloadNamespace();
+        try {
+            Double requestedCPUCores = 0.0;
+            Double coresAvailable = 0.0;
+            Double maxCores = 0.0;
+            long maxRAM = 0;
+            Double withCores = 0.0;
+            String withRAM = "0G";
+            Map<String, Double> rCPUCoreMap = getCPUCores(k8sNamespace);
+            Map<String, String[]> aResourceMap = getAvailableResources(k8sNamespace);
+            List<String> nodeNames = rCPUCoreMap.keySet().stream().collect(Collectors.toList());
+            for (String nodeName : nodeNames) {
+                String[] aResources = aResourceMap.get(nodeName);
+                if (aResources != null) {
+                    Double aCPUCores = Double.valueOf(aResources[0]);
+                    if (aCPUCores > maxCores) {
+                        maxCores = aCPUCores;
+                        withRAM = toCommonUnit(aResources[1]);
+                    }
+                    
+                    long aRAM = normalizeToLong(toCommonUnit(aResources[1]));
+                    if (aRAM > maxRAM) {
+                        maxRAM = aRAM;
+                        withCores= aCPUCores;
+                    }
+                    
+                    Double rCPUCores = rCPUCoreMap.get(nodeName);
+                    requestedCPUCores = requestedCPUCores + rCPUCores;
+                    coresAvailable = coresAvailable + aCPUCores;
+                    log.debug("Node: " + nodeName + " Cores: " + rCPUCores + "/" + aCPUCores + " RAM: " + formatter.format(Double.valueOf(aRAM)/(1024 * 1024 * 1024)) + " G");
+                }
+            }
+
+            // amount of RAM is in 'Ki' unit, use the commonly accepted 'K' unit
+            /*
+            String withRAMStr = String.valueOf(formatter.format(Double.valueOf(normalizeToLong(withRAM))/(1024 * 1024 * 1024))) + "G";
+            String maxRAMStr = String.valueOf(formatter.format(Double.valueOf(maxRAM)/(1024 * 1024 * 1024))) + "G";
+            */
+            String withRAMStr = formatter.format(Double.valueOf((normalizeToLong(withRAM))/(1024 * 1024 * 1024))) + "G";
+            String maxRAMStr = formatter.format(Double.valueOf((maxRAM)/(1024 * 1024 * 1024))) + "G";
+            return new ResourceStats(desktopCount, headlessCount, totalCount, requestedCPUCores, coresAvailable, maxCores, withRAMStr, maxRAMStr, withCores);
+        } catch (Exception e) {
+            log.error(e);
+            throw new IllegalStateException("failed to gather resource statistics", e);
+        }
+    }
+    
+    protected long normalizeToLong(String ramString) {
+        long value = 0;
+        char unit = ramString.charAt(ramString.length() - 1);
+        if (VALID_RAM_UNITS.contains(unit)) {
+            value = Integer.parseInt(ramString.substring(0, ramString.length() - 1));
+            unit = Character.toUpperCase(unit);
+            if ('K' == unit) {
+                value = value * 1024;
+            } else if ('M' == unit) {
+                value = value * 1024 * 1024;
+            } else if ('G' == unit) {
+                value = value * 1024 * 1024 * 1024;
+            } else if ('T' == unit) {
+                value = value * 1024 * 1024 * 1024 * 1024;
+            }
+        } else if (Character.isDigit(unit)) {
+            value = Integer.parseInt(ramString);
+        } else {
+            throw new IllegalStateException("unknown RAM unit: " + unit);
+        }
+        
+        return value;
+    }
+    
+    private Map<String, Double> getCPUCores(String k8sNamespace) throws Exception {
+        String getCPUCoresCmd = "kubectl -n " + k8sNamespace + " get pods --no-headers=true -o custom-columns=" + 
+                "NODENAME:.spec.nodeName,PODNAME:.metadata.name,CPUCORES:.spec.containers[].resources.requests.cpu " + 
+                "--field-selector status.phase=Running --sort-by=.spec.nodeName";
+        String cpuCores = execute(getCPUCoresCmd.split(" "));
+        Map<String, Double> nodeToCoresMap = new HashMap<String, Double>();
+        if (StringUtil.hasLength(cpuCores)) {
+            String[] lines = cpuCores.split("\n");
+            if (lines.length > 0) {
+                String nodeName = "";
+                Double nodeCPUCores = 0.0;
+                for (String line : lines) {
+                    String[] parts = line.split("\\s+");
+                    String cores = toCoreUnit(parts[2]);
+                    if (nodeName.equals(parts[0])) {
+                        if (!NONE.equalsIgnoreCase(cores)) {
+                            nodeCPUCores = nodeCPUCores + Double.valueOf(cores);
+                        }
+                    } else {
+                        if (nodeName.length() > 0) {
+                            // processing first line of a subsequent nodeName
+                            nodeToCoresMap.put(nodeName, nodeCPUCores);
+                            log.debug("Node: " + nodeName + " Cores: " + nodeCPUCores);
+                            nodeName = parts[0];
+                            if (!NONE.equalsIgnoreCase(cores)) {
+                                nodeCPUCores = Double.valueOf(cores);
+                            }
+                        } else {
+                            // processing first line of first nodeName
+                            nodeName = parts[0];
+                            if (!NONE.equalsIgnoreCase(cores)) {
+                                nodeCPUCores = Double.valueOf(cores);
+                            }
+                        }
+                    }
+                }
+                
+                // processing last line of the last nodeName
+                nodeToCoresMap.put(nodeName, nodeCPUCores);
+                log.debug("Node: " + nodeName + " Cores: " + nodeCPUCores);
+            }
+        }
+        
+        return nodeToCoresMap;
+    }
+
+    private Map<String, String[]> getAvailableResources(String k8sNamespace) throws Exception {
+        String getAvailableResourcesCmd = "kubectl -n " + k8sNamespace + " describe nodes ";
+        String rawResources = execute(getAvailableResourcesCmd.split(" "));
+        Map<String, String[]> nodeToResourcesMap = new HashMap<String, String[]>();
+        if (StringUtil.hasLength(rawResources)) {
+            String[] lines = rawResources.split("\n");
+            if (lines.length > 0) {
+                List<String> keywords = Arrays.asList("Name:", "Capacity:", "cpu:", "memory:", "nvidia.com/gpu:", "Allocatable:");
+                String nodeName = "";
+                boolean hasName = false;
+                boolean hasCapacity = false;
+                boolean hasAllocatable = false;
+                boolean hasCores = false;
+                boolean hasRAM = false;
+                boolean hasGPU = false;
+                String[] resources = null;
+                for (String line : lines) {
+                    String[] parts = line.replaceAll("\\s+", " ").trim().split(" ");
+                    if (keywords.stream().anyMatch(parts[0]::equals)) {
+                        if ("Name:".equals(parts[0])) {
+                            // start processing a new node
+                            hasName = true;
+                            hasCapacity = false;
+                            hasAllocatable = false;
+                            hasCores = false;
+                            hasRAM = false;
+                            hasGPU = false;
+                            resources = new String[2];
+                            nodeName = parts[1];
+                        } else if (!hasAllocatable && !hasGPU && hasName) {
+                            if ("Capacity:".equals(parts[0])) {
+                                if (!hasCapacity && !hasCores && !hasRAM) {
+                                    hasCapacity = true;
+                                } else {
+                                    throw new IllegalStateException("Unexpected 'Capabity:' line");
+                                }
+                            } else if (hasCapacity) {
+                                if ("cpu:".equals(parts[0])) {
+                                    if (!hasCores) {
+                                        // number of cores from "Capabity.cpu", 
+                                        String cores = toCoreUnit(parts[1]);
+                                        resources[0] = cores;
+                                        hasCores = true;
+                                    } else {
+                                        throw new IllegalStateException("Unexpected 'cpu:' line");
+                                    }
+                                } else if ("memory:".equals(parts[0])) {
+                                    if (!hasRAM) {
+                                        // amount of RAM from "Capabity.memory" is in Ki
+                                        String ram = parts[1];
+                                        resources[1] = ram;
+                                        
+                                        hasRAM = true;
+                                    } else {
+                                        throw new IllegalStateException("Unexpected 'memory:' line");
+                                    }
+                                } else if ("nvidia.com/gpu:".equals(parts[0])) {
+                                    if (Integer.parseInt(parts[1]) > 0 ) {
+                                        // we do not count resources on a node with nvidia gpu
+                                        hasGPU = true;
+                                    }
+                                } else if ("Allocatable:".equals(parts[0]) && hasCores && hasRAM) {
+                                    // finish processing the resources of a node
+                                    nodeToResourcesMap.put(nodeName, resources);
+                                    hasAllocatable = true;
+                                    // TODO: add RAM unit to debug message
+                                    log.debug("node: " + nodeName + ", cores=" + resources[0] + ", RAM=" + resources[1]);
+                                    
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return nodeToResourcesMap;
     }
     
     public String getSingleSession(String sessionID) throws Exception {
@@ -186,7 +407,7 @@ public class GetAction extends SessionAction {
     public String getEventLogs(String sessionID) throws Exception {
         String events = getEvents(userID, sessionID);
         if (!StringUtil.hasLength(events)) {
-            events = "<none>";
+            events = NONE;
         }
         return events + "\n";
     }

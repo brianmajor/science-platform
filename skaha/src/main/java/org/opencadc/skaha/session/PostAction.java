@@ -81,7 +81,13 @@ import java.io.OutputStream;
 import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import javax.security.auth.Subject;
@@ -115,6 +121,7 @@ public class PostAction extends SessionAction {
     public static final String SKAHA_SESSIONID = "skaha.sessionid";
     public static final String SKAHA_SESSIONNAME = "skaha.sessionname";
     public static final String SKAHA_SESSIONTYPE = "skaha.sessiontype";
+    public static final String SKAHA_SESSIONEXPIRY = "skaha.sessionexpiry";
     public static final String SKAHA_JOBNAME = "skaha.jobname";
     public static final String SKAHA_SCHEDULEGPU = "skaha.schedulegpu";
     public static final String SOFTWARE_JOBNAME = "software.jobname";
@@ -164,7 +171,7 @@ public class PostAction extends SessionAction {
                 
                 // check for no existing session for this user
                 // (rule: only 1 session of same type per user allowed)
-                checkForExistingSession(userID, validatedType);
+                checkExistingSessions(userID, validatedType);
                 
                 // create a new session id
                 // (VNC passwords are only good up to 8 characters)
@@ -214,7 +221,23 @@ public class PostAction extends SessionAction {
                 syncOutput.getOutputStream().write((sessionID + "\n").getBytes());
                 
             } else {
-                throw new UnsupportedOperationException("Cannot modify an existing session.");
+                String action = syncInput.getParameter("action");
+                if (StringUtil.hasLength(action)) {
+                    if (action.equalsIgnoreCase("renew")) {
+                        Map<String, List<String>> jobNameToAttributesMap = getJobsToRenew(userID, sessionID);
+                        if (!jobNameToAttributesMap.isEmpty()) {
+                            for (Map.Entry<String, List<String>> entry : jobNameToAttributesMap.entrySet()) {
+                                renew(entry);
+                            }
+                        } else {
+                            throw new IllegalArgumentException("No active job for user " + userID + " with session " + sessionID);
+                        }
+                    } else {
+                        throw new UnsupportedOperationException("unrecognized action");
+                    }
+                } else {
+                    throw new UnsupportedOperationException("Cannot modify an existing session");
+                }
             }
             return;
         }
@@ -230,12 +253,111 @@ public class PostAction extends SessionAction {
                     throw new IllegalArgumentException("Missing parameter 'image'");
                 }
                 
-                attachSoftware(image, params);
+                attachDesktopApp(image, params);
                 
             } else {
                 throw new UnsupportedOperationException("Cannot modify an existing app.");
             }
         }
+    }
+    
+    private void renew(Map.Entry<String, List<String>> entry) throws Exception {
+        Long newExpiryTime = calculateExpiryTime(entry.getValue());
+        if (newExpiryTime > 0) {
+            String k8sNamespace = K8SUtil.getWorkloadNamespace();
+            List<String> renewExpiryTimeCmd = new ArrayList<String>();
+            renewExpiryTimeCmd.add("kubectl");
+            renewExpiryTimeCmd.add("--namespace");
+            renewExpiryTimeCmd.add(k8sNamespace);
+            renewExpiryTimeCmd.add("patch");
+            renewExpiryTimeCmd.add("job");
+            renewExpiryTimeCmd.add(entry.getKey());
+            renewExpiryTimeCmd.add("--type=json");
+            renewExpiryTimeCmd.add("-p");
+            renewExpiryTimeCmd.add("[{\"op\":\"add\",\"path\":\"/spec/activeDeadlineSeconds\", \"value\":" + newExpiryTime + "}]");
+            execute(renewExpiryTimeCmd.toArray(new String[0]));
+        }
+    }
+    
+    
+    private Long calculateExpiryTime(List<String> jobAttributes) throws Exception {
+        String uid = jobAttributes.get(0);
+        String startTimeStr = jobAttributes.get(1);
+
+        String configuredExpiryStr = K8SUtil.getSessionExpiry();
+        if (!StringUtil.hasLength(configuredExpiryStr)) {
+            throw new IllegalStateException("missing configuration item " + SKAHA_SESSIONEXPIRY);
+        }
+        Long configuredExpiryTime = Long.parseLong(configuredExpiryStr);
+
+        String k8sNamespace = K8SUtil.getWorkloadNamespace();
+        Map<String, String> jobExpiryTimeMap = getJobExpiryTimes(k8sNamespace, userID);
+        String activeDeadlineSecondsStr = jobExpiryTimeMap.get(uid);
+        if (StringUtil.hasLength(activeDeadlineSecondsStr)) {
+            Long activeDeadlineSeconds = Long.parseLong(activeDeadlineSecondsStr);
+            Instant startTime = Instant.parse(startTimeStr);
+            
+            Long timeUsed = startTime.until(Instant.now(), ChronoUnit.SECONDS);
+            Long timeRemaining = activeDeadlineSeconds - timeUsed;
+            // default to no need to extend the expiry time
+            Long calculatedTime = 0L;
+            if (configuredExpiryTime > timeRemaining) {
+                // add elapsed time (from startTime to now) to the configured expiry time
+                calculatedTime = startTime.until(Instant.now(), ChronoUnit.SECONDS) + configuredExpiryTime;
+            }
+
+            return calculatedTime;
+        } else {
+            throw new IllegalStateException("missing configuration item activeDeadlineSeconds");
+        }
+    }
+    
+    private Map<String, List<String>> getJobsToRenew(String forUserID, String sessionID) throws Exception {
+        String k8sNamespace = K8SUtil.getWorkloadNamespace();
+        List<String> getRenewJobNamesCmd = new ArrayList<String>();
+        getRenewJobNamesCmd.add("kubectl");
+        getRenewJobNamesCmd.add("get");
+        getRenewJobNamesCmd.add("--namespace");
+        getRenewJobNamesCmd.add(k8sNamespace);
+        getRenewJobNamesCmd.add("job");
+        getRenewJobNamesCmd.add("-l");
+        getRenewJobNamesCmd.add("canfar-net-sessionID=" + sessionID + ",canfar-net-userid=" + forUserID);
+        getRenewJobNamesCmd.add("--no-headers=true");
+        getRenewJobNamesCmd.add("-o");
+        
+        String customColumns = "custom-columns=" +
+            "NAME:.metadata.name," + 
+            "UID:.metadata.uid," + 
+            "STATUS:.status.active," + 
+            "START:.status.startTime";
+        
+        getRenewJobNamesCmd.add(customColumns);
+                
+        String renewJobNamesStr = execute(getRenewJobNamesCmd.toArray(new String[0]));
+        log.debug("jobs for user " + forUserID + " with session ID=" + sessionID + ":\n" + renewJobNamesStr);
+       
+        Map<String, List<String>> renewJobMap = new HashMap<String, List<String>>();
+        if (StringUtil.hasLength(renewJobNamesStr)) {
+            String[] lines = renewJobNamesStr.split("\n");
+            if (lines.length > 0) {
+                for (String line : lines) {
+                    List<String> renewJobAttributes = new ArrayList<String>();
+                    String[] parts = line.replaceAll("\\s+", " ").trim().split(" ");
+                    String jobName = parts[0];
+                    String uid = parts[1];
+                    String isActive= parts[2];
+                    String startTime= parts[3];
+                    // look for the job ID of an active session
+                    if (!NONE.equalsIgnoreCase(isActive) && (Integer.parseInt(isActive) == 1)) {
+                        renewJobAttributes.add(uid);
+                        renewJobAttributes.add(startTime);
+                        renewJobMap.put(jobName, renewJobAttributes);
+                    }
+                }
+            }
+        }
+
+        return renewJobMap;
     }
     
     private void validateName(String name) {
@@ -290,18 +412,28 @@ public class PostAction extends SessionAction {
         
     }
     
-    public void checkForExistingSession(String userid, String type) throws Exception {
+    public void checkExistingSessions(String userid, String type) throws Exception {
         // multiple 
         if (SESSION_TYPE_HEADLESS.equals(type)) {
             return;
         }
         List<Session> sessions = super.getAllSessions(userid);
+        int count = 0;
         for (Session session : sessions) {
-            if (session.getType().equals(type) &&
-                    !session.getStatus().equals(Session.STATUS_TERMINATING) &&
-                    !session.getStatus().equals(Session.STATUS_SUCCEEDED)) {
-                throw new IllegalArgumentException("User " + userID + " has a session already running.");
+            log.debug("checking session: " + session);
+            if (!SESSION_TYPE_HEADLESS.equalsIgnoreCase(session.getType()) &&
+                !TYPE_DESKTOP_APP.equals(session.getType())) {
+                String status = session.getStatus();
+                if (!(status.equalsIgnoreCase(Session.STATUS_TERMINATING) ||
+                      status.equalsIgnoreCase(Session.STATUS_SUCCEEDED))) {
+                    count++;
+                }
             }
+        }
+        log.debug("active interactive sessions: " + count);
+        if (count >= maxUserSessions) {
+            throw new IllegalArgumentException("User " + userID + " has reached the maximum of " +
+                maxUserSessions + " active sessions.");
         }
     }
     
@@ -357,6 +489,7 @@ public class PostAction extends SessionAction {
         
         jobLaunchString = setConfigValue(jobLaunchString, SKAHA_SESSIONID, sessionID);
         jobLaunchString = setConfigValue(jobLaunchString, SKAHA_SESSIONNAME, name.toLowerCase());
+        jobLaunchString = setConfigValue(jobLaunchString, SKAHA_SESSIONEXPIRY, K8SUtil.getSessionExpiry());
         jobLaunchString = setConfigValue(jobLaunchString, SKAHA_JOBNAME, jobName);
         jobLaunchString = setConfigValue(jobLaunchString, SKAHA_HOSTNAME, K8SUtil.getHostName());
         jobLaunchString = setConfigValue(jobLaunchString, SKAHA_USERID, userID);
@@ -369,9 +502,9 @@ public class PostAction extends SessionAction {
         jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_IMAGESECRET, imageSecret);
         jobLaunchString = setConfigValue(jobLaunchString, HEADLESS_IMAGE_BUNDLE, headlessImageBundle);
         jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_REQUESTS_CORES, cores.toString());
-        jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_REQUESTS_RAM, ram.toString() + "G");
+        jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_REQUESTS_RAM, ram.toString() + "Gi");
         jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_LIMITS_CORES, cores.toString());
-        jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_LIMITS_RAM, ram.toString() + "G");
+        jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_LIMITS_RAM, ram.toString() + "Gi");
         jobLaunchString = setConfigValue(jobLaunchString, SOFTWARE_LIMITS_GPUS, gpus.toString());
         
         String jsonLaunchFile = super.stageFile(jobLaunchString);
@@ -418,14 +551,18 @@ public class PostAction extends SessionAction {
 
     }
     
-    public void attachSoftware(String image, List<String> params) throws Exception {
+    public void attachDesktopApp(String image, List<String> params) throws Exception {
         
         String k8sNamespace = K8SUtil.getWorkloadNamespace();
         
         // Get the IP address based on the session
         String[] getIPCommand = new String[] {
             "kubectl", "-n", k8sNamespace, "get", "pod", "--selector=canfar-net-sessionID=" + sessionID,
-                "--no-headers=true", "-o", "custom-columns=IPADDR:.status.podIP,DT:.metadata.deletionTimestamp"};
+                "--no-headers=true", 
+                "-o", "custom-columns=" +
+                    "IPADDR:.status.podIP," +
+                    "DT:.metadata.deletionTimestamp," +
+                    "TYPE:.metadata.labels.canfar-net-sessionType"};
         String ipResult = execute(getIPCommand);
         log.debug("GET IP result: " + ipResult);
         
@@ -439,7 +576,8 @@ public class PostAction extends SessionAction {
                     log.debug("part: " + part);
                 }
             }
-            if (parts.length > 1 && parts[1].trim().equals("<none>")) {
+            if (parts.length > 1 && parts[1].trim().equals(NONE) && 
+                    SESSION_TYPE_DESKTOP.equals(parts[2])) {
                 targetIP = parts[0].trim();
             }
         }
@@ -448,7 +586,7 @@ public class PostAction extends SessionAction {
             throw new ResourceNotFoundException("session " + sessionID + " not found");
         }
         
-        log.debug("attaching software: " + image + " to " + targetIP);
+        log.debug("attaching desktop app: " + image + " to " + targetIP);
         
         String name = getImageName(image);
         log.debug("name: " + name);
@@ -462,7 +600,7 @@ public class PostAction extends SessionAction {
         String posixID = getPosixId();
         String supplementalGroups = getSupplementalGroupsList();
 
-        String launchSoftwarePath = System.getProperty("user.home") + "/config/launch-software.yaml";
+        String launchSoftwarePath = System.getProperty("user.home") + "/config/launch-desktop-app.yaml";
         byte[] launchBytes = Files.readAllBytes(Paths.get(launchSoftwarePath));
 
         // incoming params ignored for the time being.  set to the 'name' so
@@ -488,12 +626,14 @@ public class PostAction extends SessionAction {
         String gpuScheduling = getGPUScheduling(0);
         
         String launchString = new String(launchBytes, "UTF-8");
+        launchString = setConfigValue(launchString, SKAHA_SESSIONID, sessionID);
         launchString = setConfigValue(launchString, SOFTWARE_JOBNAME, jobName);
         launchString = setConfigValue(launchString, SOFTWARE_HOSTNAME, containerName);
         launchString = setConfigValue(launchString, SOFTWARE_CONTAINERNAME, containerName);
         launchString = setConfigValue(launchString, SOFTWARE_CONTAINERPARAM, param);
         launchString = setConfigValue(launchString, SKAHA_USERID, userID);
         launchString = setConfigValue(launchString, SKAHA_SESSIONTYPE, SessionAction.TYPE_DESKTOP_APP);
+        launchString = setConfigValue(launchString, SKAHA_SESSIONEXPIRY, K8SUtil.getSessionExpiry());
         launchString = setConfigValue(launchString, SOFTWARE_TARGETIP, targetIP + ":1");
         launchString = setConfigValue(launchString, SKAHA_POSIXID, posixID);
         launchString = setConfigValue(launchString, SKAHA_SUPPLEMENTALGROUPS, supplementalGroups); 
@@ -559,7 +699,7 @@ public class PostAction extends SessionAction {
             return null;
         }
         if (get.getThrowable() != null) {
-            log.warn("error obtaining harbor secret", get.getThrowable());
+            log.warn("error obtaining harbor secret. response code: " + get.getResponseCode());
             return null;
         }
         String userJson = out.toString();

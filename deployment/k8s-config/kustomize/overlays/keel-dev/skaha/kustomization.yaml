@@ -15,7 +15,7 @@ configMapGenerator:
   - config/launch-desktop.yaml
   - config/launch-firefly.yaml
   - config/launch-headless.yaml
-  - config/launch-software.yaml
+  - config/launch-desktop-app.yaml
   - config/launch-contributed.yaml
   - config/service-notebook.yaml
   - config/ingress-notebook.yaml
