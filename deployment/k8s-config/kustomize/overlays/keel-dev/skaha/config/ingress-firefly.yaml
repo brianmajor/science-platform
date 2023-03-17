@@ -1,22 +1,25 @@
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
-  name: skaha-firefly-middleware-${skaha.sessionid}
+  name: skaha-firefly-middleware-2-${skaha.sessionid}
 spec:
-  #replacePathRegex:
-  #  regex: ^/session/firefly/${skaha.sessionid}(/|$)(.*)
-  #  replacement: /$2
-  #rewriteHeaders:
-  #  header: "Location"
-  #  #example redirect: http://traefik-65f78c84cc-rd5ls/firefly/CmdSrv/async/1667850008778 
-  #  regex: "^(([^:/?#]+):)?(//([^/?#]*))(.*)"
-  #  replacement: "https://rc-uv.canfar.net/session/firefly/${skaha.sessionid}/$5"
+  replacePathRegex:
+    regex: ^/session/firefly/${skaha.sessionid}(/|$)(.*)
+    replacement: /$2
+
+---
+
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: skaha-firefly-middleware-1-${skaha.sessionid}
+spec:
   headers:
     customRequestHeaders:
       X-Forwarded-Path: /session/firefly/${skaha.sessionid}
       X-Forwarded-Host: rc-uv.canfar.net
       X-Forwarded-Proto: https
-      X-Forwarded-Port: 443
+      #X-Forwarded-Port: 443
 
 ---
 
@@ -36,4 +39,5 @@ spec:
       port: 8080
       scheme: http
     middlewares:
-      - name: skaha-firefly-middleware-${skaha.sessionid}
+      - name: skaha-firefly-middleware-1-${skaha.sessionid}
+      - name: skaha-firefly-middleware-2-${skaha.sessionid}
