@@ -1,25 +1,11 @@
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
-  name: skaha-firefly-middleware-2-${skaha.sessionid}
+  name: skaha-firefly-middleware-${skaha.sessionid}
 spec:
   replacePathRegex:
     regex: ^/session/firefly/${skaha.sessionid}(/|$)(.*)
     replacement: /$2
-
----
-
-apiVersion: traefik.containo.us/v1alpha1
-kind: Middleware
-metadata:
-  name: skaha-firefly-middleware-1-${skaha.sessionid}
-spec:
-  headers:
-    customRequestHeaders:
-      X-Forwarded-Path: /session/firefly/${skaha.sessionid}
-      X-Forwarded-Host: rc-uv.canfar.net
-      X-Forwarded-Proto: https
-      #X-Forwarded-Port: 443
 
 ---
 
@@ -39,5 +25,4 @@ spec:
       port: 8080
       scheme: http
     middlewares:
-      - name: skaha-firefly-middleware-1-${skaha.sessionid}
-      - name: skaha-firefly-middleware-2-${skaha.sessionid}
+      - name: skaha-firefly-middleware-${skaha.sessionid}

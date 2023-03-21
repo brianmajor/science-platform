@@ -34,6 +34,8 @@ spec:
       containers:
       - name: "${skaha.jobname}"
         env:
+        - name: baseURL
+          value: "/session/${skaha.sessionid}"
         - name: skaha_hostname
           value: "${skaha.hostname}"
         - name: skaha_username
