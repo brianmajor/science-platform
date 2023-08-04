@@ -130,15 +130,12 @@ public class ImagesTest {
     public void testGetImageList() {
         try {
             
-            Subject.doAs(userSubject, new PrivilegedExceptionAction<Object>() {
+            Subject.doAs(userSubject, (PrivilegedExceptionAction<Object>) () -> {
 
-                public Object run() throws Exception {
-                    
-                    // should have at least one image
-                    List<Image> images = getImages();
-                    Assert.assertTrue("one or more images", images.size() > 0);
-                    return null;
-                }
+                // should have at least one image
+                List<Image> images = getImages();
+                Assert.assertTrue("one or more images", images.size() > 0);
+                return null;
             });
             
         } catch (Exception t) {
