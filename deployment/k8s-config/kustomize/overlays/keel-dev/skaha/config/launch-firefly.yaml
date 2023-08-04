@@ -35,7 +35,7 @@ spec:
       - name: "${skaha.jobname}"
         env:
         - name: baseURL
-          value: "/session/${skaha.sessionid}"
+          value: "/session/firefly/${skaha.sessionid}"
         - name: skaha_hostname
           value: "${skaha.hostname}"
         - name: skaha_username
