@@ -256,7 +256,7 @@ public abstract class SessionAction extends SkahaAction {
     }
     
     public static String getFireflyURL(String host, String sessionID, String userid) throws MalformedURLException {
-        return "https://" + host + "/session/firefly/" + sessionID + "/suit/suit.html";
+        return "https://" + host + "/session/firefly/" + sessionID + "/firefly";
     }
     
     public static String getContributedURL(String host, String sessionID) throws MalformedURLException {
