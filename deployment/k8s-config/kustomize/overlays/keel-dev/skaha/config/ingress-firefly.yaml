@@ -7,7 +7,17 @@
 #    regex: ^/session/firefly/${skaha.sessionid}(/|$)(.*)
 #    replacement: /$2
 #
-#---
+
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: skaha-firefly-middleware-${skaha.sessionid}
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: https
+
+---
 
 apiVersion: traefik.containo.us/v1alpha1
 kind: IngressRoute
@@ -24,5 +34,5 @@ spec:
       name: skaha-firefly-svc-${skaha.sessionid}
       port: 8080
       scheme: http
-#    middlewares:
-#      - name: skaha-firefly-middleware-${skaha.sessionid}
+    middlewares:
+      - name: skaha-firefly-middleware-${skaha.sessionid}
