@@ -5,7 +5,7 @@ metadata:
     run: arc-tomcat
   name: arc-tomcat
 spec:
-  replicas: 1
+  replicas: 3
   selector:
     matchLabels:
       run: arc-tomcat
@@ -24,7 +24,7 @@ spec:
                 operator: DoesNotExist
       containers:
       - name: arc-tomcat
-        image: images.canfar.net/skaha-system/cavern:0.4.5
+        image: images.canfar.net/skaha-system/cavern:0.4.8
         imagePullPolicy: Always
         resources:
           requests:

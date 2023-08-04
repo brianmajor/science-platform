@@ -3,7 +3,7 @@
  *******************  CANADIAN ASTRONOMY DATA CENTRE  *******************
  **************  CENTRE CANADIEN DE DONNÉES ASTRONOMIQUES  **************
  *
- *  (c) 2021.                            (c) 2021.
+ *  (c) 2023.                            (c) 2023.
  *  Government of Canada                 Gouvernement du Canada
  *  National Research Council            Conseil national de recherches
  *  Ottawa, Canada, K1A 0R6              Ottawa, Canada, K1A 0R6
@@ -62,78 +62,80 @@
  *  <http://www.gnu.org/licenses/>.      pas le cas, consultez :
  *                                       <http://www.gnu.org/licenses/>.
  *
+ *
  ************************************************************************
  */
-package org.opencadc.skaha.image;
 
-import java.util.HashSet;
-import java.util.Set;
+package org.opencadc.skaha.session;
 
-/**
- * @author majorb
- *
- */
-public class Image {
-    
-    private String id;
-    private Set<String> types;
-    private String digest;
-    
-    public Image(String id, Set<String> types, String digest) {
-        if (id == null) {
-            throw new IllegalArgumentException("id requried");
-        }
-        if (types == null || types.isEmpty()) {
-            throw new IllegalArgumentException("type required");
-        }
-        if (digest == null) {
-            throw new IllegalArgumentException("digest requried");
-        }
-        this.id = id;
-        this.types = new HashSet<String>(types);
-        this.digest = digest;
+import ca.nrc.cadc.util.Log4jInit;
+import org.apache.log4j.Level;
+import org.junit.Assert;
+import org.junit.Test;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.UUID;
+
+
+public class PostActionTest {
+    static {
+        Log4jInit.setLevel("org.opencadc.skaha", Level.DEBUG);
     }
 
-    public String getId() {
-        return id;
-    }
-
-    public Set<String> getTypes() {
-        return types;
-    }
-
-    public String getDigest() {
-        return digest;
-    }
-    
-    @Override
-    public boolean equals(Object o) {
-        if (o instanceof Image) {
-            Image i = (Image) o;
-            return i.id.equals(this.id) && i.digest.equals(this.digest) && hasSameTypes(i.types);
-        }
-        return false;
-    }
-
-    private boolean hasSameTypes(Set<String> inputTypes) {
-        if (inputTypes == null || inputTypes.isEmpty()) {
-            return false;
-        }
-
-        for (String iType : inputTypes) {
-            boolean found = false;
-            for (String type : this.types) {
-                if (type.equals(iType)) {
-                   found = true;
-                   break;
-                }
+    @Test
+    public void allocateUserError() throws Exception {
+        final PostAction testSubject = new PostAction() {
+            @Override
+            String getUserID() {
+                return "TESTUSER";
             }
-            
-            if (!found) {
-                return false;
+
+            @Override
+            String getDefaultQuota() {
+                return "14";
             }
+
+            @Override
+            void executeCommand(String[] command, OutputStream standardOut, OutputStream standardErr)
+                    throws IOException {
+                standardOut.write("".getBytes());
+                standardErr.write("Forbidden to write.".getBytes());
+            }
+        };
+
+        try {
+            testSubject.allocateUser();
+            Assert.fail("Should throw IOException");
+        } catch (IOException exception) {
+            // Good.
+            Assert.assertEquals("Wrong message.", "Unable to create user home."
+                                                  + "\nError message from server: Forbidden to write."
+                                                  + "\nOutput from command: ", exception.getMessage());
         }
-        
-        return true;
+    }
+
+    @Test
+    public void allocateUser() throws Exception {
+        final PostAction testSubject = new PostAction() {
+            @Override
+            String getUserID() {
+                return "TESTUSER";
+            }
+
+            @Override
+            String getDefaultQuota() {
+                return "14";
+            }
+
+            @Override
+            void executeCommand(String[] command, OutputStream standardOut, OutputStream standardErr)
+                    throws IOException {
+                standardOut.write("Created /home/dir".getBytes());
+            }
+        };
+
+        testSubject.allocateUser();
     }
 }

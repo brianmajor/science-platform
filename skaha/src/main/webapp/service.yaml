@@ -1,6 +1,6 @@
 swagger: '2.0'
 info:
-  version: 0.3
+  version: 0.10.0
   title: skaha
   description: |
     skaha API Documentation.  This API allows authorized users to create and interact with desktop (NoVNC), CARTA Visualization, and Jupyter Notebook sessions in the skaha processing environment.  Desktop apps can also be launched and attached to skaha desktop sessions through this API.<br/><br/>Clients may authenticate to this service by:<br/>1.  Providing a bearer token in the Authorization header.<br/>2.  Using a client certificate.<br/>3.  Using a browser cookie from CADC Login.<br/><br/>The main skaha github page with documentation and source code is here:  https://github.com/opencadc/science-platform<br/><br/>Documentation on using skaha can be found here:  https://github.com/opencadc/science-platform/tree/master/doc
@@ -8,7 +8,7 @@ schemes:
   - https
 basePath: /skaha
 paths:
-  /session:
+  /v0/session:
     get:
       description: |
         List the sessions for the calling user, returned as a JSON array.  Session attributes include:<br/><br/>Session ID<br/>User ID<br/>Image<br/>Type<br/>Status<br/>Name<br/>StartTime<br/>Connect URL<br/><br/>Valid types are 'desktop', 'carta', 'notebook', and 'headless'.
@@ -117,7 +117,7 @@ paths:
           description: Service busy
         default:
           description: Unexpected error
-  /session/{sessionID}:
+  /v0/session/{sessionID}:
     get:
       description: |
         Get the session identified by sessionID as a JSON object.
@@ -203,6 +203,30 @@ paths:
         default:
           description: Unexpected error
   /session/{sessionID}/app:
+    get:
+      description: |
+        List the desktop apps for the calling user, returned as a JSON array.  Desktop app attributes include:<br/><br/>Desktop Session ID<br/>App ID<br/>User ID<br/>Image<br/>Type<br/>Status<br/>Name<br/>StartTime<br/>Connect URL<br/><br/>Valid type is 'desktop-app'.
+      tags:
+        - Session Management
+      parameters:
+        - name: status
+          in: query
+          type: string
+          description: Only show sessions with this status (Pending, Running, Terminating, Succeeded, Error)
+          required: false
+      responses:
+        '200':
+          description: Successful response
+        '401':
+          description: Not authenticated
+        '403':
+          description: Permission denied
+        '500':
+          description: Internal error
+        '503':
+          description: Service busy
+        default:
+          description: Unexpected error
     post:
       description: |
         Attach a desktop-app to the session identified by sessionID.  This only applies to sessions of type 'desktop'.
@@ -219,6 +243,18 @@ paths:
           type: string
           description: The imageID of the desktop-app to attach
           required: true
+        - name: cores
+          in: query
+          type: string
+          description: |
+              Request this many cores for the desktop app.  This value must match a value retruned from the /context endpoint.  The default value returned from /context will be used if this parameter is not provided.
+          required: false
+        - name: ram
+          in: query
+          type: string
+          description: |
+              Request this much RAM (GB) for the desktop app.  This value must match a value retruned from the /context endpoint.  The default value returned from /context will be used if this parameter is not provided.
+          required: false
       responses:
         '200':
           description: Successful response
@@ -232,7 +268,68 @@ paths:
           description: Service busy
         default:
           description: Unexpected error
-  /image:
+  /session/{sessionID}/app/{appID}:
+    get:
+      description: |
+        Get the desktop app identified by sessionID and appID as a JSON object.
+      tags:
+        - Session Management
+      parameters:
+        - name: sessionID
+          in: path
+          type: string
+          description: Session ID of the desktop app.
+          required: true
+        - name: appID
+          in: path
+          type: string
+          description: ID of the desktop app to get, returned in application/json format.
+          required: true
+      responses:
+        '200':
+          description: Successful response
+        '401':
+          description: Not authenticated
+        '404':
+          description: Not found
+        '403':
+          description: Permission denied
+        '500':
+          description: Internal error
+        '503':
+          description: Service busy
+        default:
+          description: Unexpected error
+    delete:
+      description: |
+        Delete the desktop app identified by sessionID and appID.
+      tags:
+        - Session Management
+      parameters:
+        - name: sessionID
+          in: path
+          type: string
+          description: Session ID of the desktop app to delete.
+          required: true
+        - name: appID
+          in: path
+          type: string
+          description: ID of the desktop app to delete.
+          required: true
+      responses:
+        '200':
+          description: Successful response
+        '401':
+          description: Not authenticated
+        '403':
+          description: Permission denied
+        '500':
+          description: Internal error
+        '503':
+          description: Service busy
+        default:
+          description: Unexpected error
+  /v0/image:
     get:
       description: |
         List the images available for launching to the calling user, returned as a JSON array.  Image attributes include:<br/><br/>Image ID<br/>Image Type<br/>Digest (checksum)
@@ -257,7 +354,7 @@ paths:
         type: string
         description: Only show images of this type (desktop, notebook, or carta)
         required: false
-  /context:
+  /v0/context:
     get:
       description: |
         List the CPU cores and Random Access Memory available for launching to the calling user, returned as JSON objects.  The default values for both cores and RAM are also returned.

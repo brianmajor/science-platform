@@ -3,11 +3,12 @@ kind: Deployment
 metadata:
   name: arc-tomcat
 spec:
+  replicas: 1
   template:
     spec:
       containers:
       - name: arc-tomcat
-        image: images-rc.canfar.net/skaha-system/cavern:0.4.5
+        image: images-rc.canfar.net/skaha-system/cavern:0.4.8
       volumes:
       - name: cavern-ceph-volume
         cephfs:

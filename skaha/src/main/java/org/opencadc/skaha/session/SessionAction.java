@@ -74,6 +74,7 @@ import ca.nrc.cadc.net.ResourceNotFoundException;
 import ca.nrc.cadc.rest.InlineContentHandler;
 import ca.nrc.cadc.util.StringUtil;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedWriter;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -87,6 +88,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.WritableByteChannel;
+import java.nio.charset.StandardCharsets;
 import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.time.Instant;
@@ -124,11 +126,6 @@ public abstract class SessionAction extends SkahaAction {
     
     public SessionAction() {
         super();
-    }
-    
-    @Override
-    protected InlineContentHandler getInlineContentHandler() {
-        return null;
     }
 
     protected void initRequest() throws Exception {
@@ -168,11 +165,11 @@ public abstract class SessionAction extends SkahaAction {
         while ((nRead = in.read(data, 0, data.length)) != -1) {
             buffer.write(data, 0, nRead);
         }
-        return buffer.toString("UTF-8");
+        return buffer.toString(StandardCharsets.UTF_8);
     }
     
     public static String execute(String[] command) throws IOException, InterruptedException {
-        return execute(command, false);
+        return execute(command, true);
     }
     
     public static void execute(String[] command, OutputStream out) throws IOException, InterruptedException {
@@ -189,12 +186,12 @@ public abstract class SessionAction extends SkahaAction {
             }
             count = rbc.read(buffer);
             if (count != -1) {
-                wbc.write((ByteBuffer)buffer.flip());
+                wbc.write(buffer.flip());
                 buffer.flip();
             }
         }
     }
-    
+
     public static String execute(String[] command, boolean allowError) throws IOException, InterruptedException {
         Process p = Runtime.getRuntime().exec(command);
         String stdout = readStream(p.getInputStream());
@@ -213,6 +210,29 @@ public abstract class SessionAction extends SkahaAction {
         } 
         return stdout.trim();
     }
+
+    public static void execute(final String[] command, final OutputStream standardOut, final OutputStream standardErr)
+            throws IOException, InterruptedException {
+        final Process p = Runtime.getRuntime().exec(command);
+        final int code = p.waitFor();
+        try (final InputStream stdOut = new BufferedInputStream(p.getInputStream());
+             final InputStream stdErr = new BufferedInputStream(p.getErrorStream())) {
+            final String commandOutput = readStream(stdOut);
+            if (code != 0) {
+                final String errorOutput = readStream(stdErr);
+                log.error("Code (" + code + ") found from command " + Arrays.toString(command));
+                log.error(errorOutput);
+                standardErr.write(errorOutput.getBytes());
+                standardErr.flush();
+            } else {
+                log.debug(commandOutput);
+                log.debug("Executing " + Arrays.toString(command) + ": OK");
+            }
+            standardOut.write(commandOutput.getBytes());
+            standardOut.flush();
+        }
+    }
+
     
     public static String getVNCURL(String host, String sessionID) throws MalformedURLException {
         // vnc_light.html accepts title and resize
@@ -247,22 +267,21 @@ public abstract class SessionAction extends SkahaAction {
             throws PrivilegedActionException, IOException, InterruptedException {
         
         // creating cert home dir
-        execute(new String[] {"mkdir", "-p", homedir + "/" + userid + "/.ssl"});
+        // UPDATE 2023.05.04
+        // This is handled by the user creation script.  Adding this here is very misleading if the user creation
+        // failed!  Keeping this here for now as a record.
+        // jenkinsd
+//        execute(new String[] {"mkdir", "-p", homedir + "/" + userid + "/.ssl"});
         
         // get the proxy cert
         Subject opsSubject = CredUtil.createOpsSubject();
-        String proxyCert = Subject.doAs(opsSubject, new PrivilegedExceptionAction<String>() {
-            @Override
-            public String run() throws Exception {
-                ByteArrayOutputStream out = new ByteArrayOutputStream();
-                String userid = subject.getPrincipals(HttpPrincipal.class).iterator().next().getName();
-                HttpGet download = new HttpGet(
-                        new URL("https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/cred/priv/userid/" + userid), out);
-                download.run();
-                String proxyCert = out.toString();
-                    
-                return proxyCert;
-            } 
+        String proxyCert = Subject.doAs(opsSubject, (PrivilegedExceptionAction<String>) () -> {
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            String userid1 = subject.getPrincipals(HttpPrincipal.class).iterator().next().getName();
+            HttpGet download = new HttpGet(
+                    new URL("https://ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/cred/priv/userid/" + userid1), out);
+            download.run();
+            return out.toString();
         });
         log.debug("Proxy cert: " + proxyCert);
         // inject the proxy cert
@@ -392,9 +411,24 @@ public abstract class SessionAction extends SkahaAction {
         execute(getLogsCmd.toArray(new String[0]), out);
     }
     
+    public Session getDesktopApp(String forUserID, String sessionID, String appID) throws Exception {
+        List<Session> sessions = getSessions(userID, sessionID);
+        if (sessions.size() > 0) {
+            for (Session session : sessions) {
+                // only include 'desktop-app'
+                if (SkahaAction.TYPE_DESKTOP_APP.equalsIgnoreCase(session.getType()) &&
+                    (sessionID.equals(session.getId())) && (appID.equals(session.getAppId()))) {
+                    return session;
+                }
+            }
+        } 
+
+        throw new ResourceNotFoundException("desktop app with session " + sessionID + " and app ID " + appID + " was not found");
+    }
+    
     public Session getSession(String forUserID, String sessionID) throws Exception {
         List<Session> sessions = getSessions(forUserID, sessionID);
-        if (sessions.size() >0) {
+        if (sessions.size() > 0) {
             for (Session session : sessions) {
                 // exclude 'desktop-app'
                 if (!SkahaAction.TYPE_DESKTOP_APP.equalsIgnoreCase(session.getType())) {
@@ -649,7 +683,8 @@ public abstract class SessionAction extends SkahaAction {
             "STATUS:.status.phase," +
             "NAME:.metadata.labels.canfar-net-sessionName," +
             "STARTED:.status.startTime," +
-            "DELETION:.metadata.deletionTimestamp";
+            "DELETION:.metadata.deletionTimestamp," +
+            "APPID:.metadata.labels.canfar-net-appID";
         if (forUserID != null) {
             customColumns = customColumns + 
             ",REQUESTEDRAM:.spec.containers[0].resources.requests.memory," +
@@ -710,6 +745,40 @@ public abstract class SessionAction extends SkahaAction {
         return getSessionGPUCMD;        
     }
     
+    protected String getAppJobName(String sessionID, String userID, String appID) throws IOException, InterruptedException {
+        String k8sNamespace = K8SUtil.getWorkloadNamespace();
+        List<String> getAppJobNameCMD = getAppJobNameCMD(k8sNamespace, userID, sessionID, appID);
+        return execute(getAppJobNameCMD.toArray(new String[0]));
+    }
+    
+    private List<String> getAppJobNameCMD(String k8sNamespace, String userID, String sessionID, String appID) {
+        String labels = "canfar-net-sessionType=" + TYPE_DESKTOP_APP;
+        labels = labels + ",canfar-net-userid=" + userID;
+        if (sessionID != null) {
+            labels = labels + ",canfar-net-sessionID=" + sessionID;
+        }
+        if (appID != null) {
+            labels = labels + ",canfar-net-appID=" + appID;
+        }
+
+        List<String> getAppJobNameCMD = new ArrayList<String>();
+        getAppJobNameCMD.add("kubectl");
+        getAppJobNameCMD.add("get");
+        getAppJobNameCMD.add("--namespace");
+        getAppJobNameCMD.add(k8sNamespace);
+        getAppJobNameCMD.add("job");
+        getAppJobNameCMD.add("-l");
+        getAppJobNameCMD.add(labels);
+        getAppJobNameCMD.add("--no-headers=true");
+        getAppJobNameCMD.add("-o");
+        
+        String customColumns = "custom-columns=" +
+            "NAME:.metadata.name";
+        
+        getAppJobNameCMD.add(customColumns);
+        return getAppJobNameCMD;
+    }
+
     protected Session constructSession(String k8sOutput) throws IOException {
         log.debug("line: " + k8sOutput);
         String[] parts = k8sOutput.trim().replaceAll("\\s+", " ").split(" ");
@@ -721,6 +790,7 @@ public abstract class SessionAction extends SkahaAction {
         String name = parts[5];
         String startTime = parts[6];
         String deletionTimestamp = parts[7];
+        String appID = parts[8];
         if (deletionTimestamp != null && !NONE.equals(deletionTimestamp)) {
             status = Session.STATUS_TERMINATING;
         }
@@ -749,10 +819,12 @@ public abstract class SessionAction extends SkahaAction {
         }
 
         Session session = new Session(id, userid, image, type, status, name, startTime, connectURL);
-        if (parts.length > 8) {
-            String requestedRAM = parts[8];
-            String requestedCPUCores = parts[9];
-            String requestedGPUCores = parts[10];
+        session.setAppId(appID);
+
+        if (parts.length > 9) {
+            String requestedRAM = parts[9];
+            String requestedCPUCores = parts[10];
+            String requestedGPUCores = parts[11];
             session.setRequestedRAM(toCommonUnit(requestedRAM));
             session.setRequestedCPUCores(toCoreUnit(requestedCPUCores));
             session.setRequestedGPUCores(toCoreUnit(requestedGPUCores));
