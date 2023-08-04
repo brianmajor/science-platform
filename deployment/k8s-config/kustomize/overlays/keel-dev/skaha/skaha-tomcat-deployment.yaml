@@ -19,9 +19,13 @@ spec:
           value: "ivo://cadc.nrc.ca/gms?skaha-admins"
         - name: skaha.sessionexpiry
           value: "345600"
+<<<<<<< HEAD
+        image: images-rc.canfar.net/skaha-system/skaha:firefly
+=======
         - name: skaha.defaultquotagb
           value: "10"
         image: images-rc.canfar.net/skaha-system/skaha:0.12.0
+>>>>>>> bde7a185d15d756daa5a0b826c9fe101d55b58cc
         resources:
           requests:
             memory: "4Gi"
